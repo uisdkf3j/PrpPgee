@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <title>Maquette Viewer</title>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow-x: hidden;
+        }
+        .page-image {
+            width: 100%;
+            height: auto;
+            display: block;
+            pointer-events: none;
+        }
+        #renderCanvas {
+            width: 100%;
+            max-width: 1920px;
+            height: 1080px;
+            max-height: 100vh;
+            touch-action: none;
+            margin: 0 auto;
+            display: block;
+        }
+        @media screen and (max-width: 1920px) {
+            #renderCanvas {
+                height: 90vh;
+            }
+        }
+        .control-group {
+            margin-bottom: 10px;
+        }
+        label {
+            display: inline-block;
+            width: 120px;
+        }
+        #lightControls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            color: white;
+            font-family: Arial, sans-serif;
+            border-radius: 5px;
+            z-index: 98;
+            opacity: 0;
+            transition: opacity 0.5s ease;
+        }
+        #angleDisplay {
+            margin-left: 10px;
+        }
+        #lightToggle, #animateToggle, #ssaoToggle, #textureToggle {
+            margin-right: 15px;
+            padding: 5px 10px;
+            background: #444;
+            border: none;
+            color: white;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        #lightToggle:hover, #animateToggle:hover, #ssaoToggle:hover, #textureToggle:hover {
+            background: #555;
+        }
+        .content-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            max-width: 1920px;
+            margin: 0 auto;
+        }
+        #tourOverlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: auto;
+            z-index: 99;
+            transition: opacity 0.5s ease;
+            pointer-events: none;
+        }
+    </style>
+    <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+    <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
+</head>
+<body>
+    <div class="content-wrapper">
+        <img id="top-image" class="page-image" src="./Page_Top.png">
+        <div class="canvas-container">
+            <canvas id="renderCanvas"></canvas>
+            <img id="tourOverlay" src="./Tour.png">
+            <div id="lightControls">
+                <button id="lightToggle">Toggle Light</button>
+                <button id="animateToggle">Animate Light</button>
+                <button id="ssaoToggle">Toggle SSAO</button>
+                <button id="textureToggle">Toggle Textures</button>
+                <label for="lightRotation">Light Rotation:</label>
+                <input type="range" id="lightRotation" min="270" max="450" value="270" style="width: 200%; transform: scale(0.5); transform-origin: left;">
+                <span id="angleDisplay">270°</span>
+            </div>
+        </div>
+        <img id="bottom-image" class="page-image" src="./Page_Bottom.png">
+    </div>
+    <div id="controls">
+    </div>
+    <script>
+        // Tour overlay functionality
+        const tourOverlay = document.getElementById('tourOverlay');
+        const lightControls = document.getElementById('lightControls');
+        const canvas = document.getElementById("renderCanvas");
+        let mouseOverTimer = null;
+        let mouseOutTimer = null;
+
+        canvas.addEventListener('mouseenter', () => {
+            clearTimeout(mouseOutTimer);
+            mouseOverTimer = setTimeout(() => {
+                tourOverlay.style.opacity = '0';
+                lightControls.style.opacity = '1';
+            }, 3000);
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            clearTimeout(mouseOverTimer);
+            mouseOutTimer = setTimeout(() => {
+                tourOverlay.style.opacity = '1';
+                lightControls.style.opacity = '0';
+            }, 10000);
+        });
+
+        canvas.addEventListener('click', () => {
+            clearTimeout(mouseOverTimer);
+            tourOverlay.style.opacity = '0';
+            lightControls.style.opacity = '1';
+        });
+
+        document.addEventListener('click', (event) => {
+            if (!canvas.contains(event.target)) {
+                clearTimeout(mouseOutTimer);
+                tourOverlay.style.opacity = '1';
+                lightControls.style.opacity = '0';
+            }
+        });
+
+        const engine = new BABYLON.Engine(canvas, true);
+
+        const createScene = async function() {
+            const scene = new BABYLON.Scene(engine);
+            
+            // Create a separate scene for GUI that won't receive post-processing
+            const guiScene = new BABYLON.Scene(engine);
+            guiScene.autoClear = false; // Ensure this is set to false
+            
+            // Create GUI texture and layer in the separate GUI scene
+            const guiTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI", true, guiScene);
+            guiTexture.isPointerBlocker = true;
+            console.log("Created GUI texture:", guiTexture);
+            
+            // Enable standard tone mapping
+            scene.imageProcessingConfiguration.toneMappingEnabled = false;
+            scene.imageProcessingConfiguration.toneMappingType = BABYLON.ImageProcessingConfiguration.STANDARD;
+            
+            // Camera
+            const camera = new BABYLON.ArcRotateCamera("camera", 0, Math.PI / 3, 10, BABYLON.Vector3.Zero(), scene);
+            camera.setPosition(new BABYLON.Vector3(110.31905585058239, 126.88676026411771, 98.75498964738287));
+            camera.target = new BABYLON.Vector3(-9.040554024514288, 1.8008187332141636, -7.6968111402480135);
+            camera.alpha = 41.73 * Math.PI / 180; // Convert degrees to radians
+            camera.beta = 51.97 * Math.PI / 180; // Convert degrees to radians
+            camera.fov = 0.1; // Narrow FOV (about 23 degrees)
+            camera.inertia = 0.7; // Add camera inertia
+            camera.attachControl(canvas, true);
+
+            // Create a clone of the camera for GUI scene
+            const guiCamera = camera.clone("guiCamera");
+            guiScene.activeCamera = guiCamera;
+
+            // Log camera coordinates and angle
+            camera.onViewMatrixChangedObservable.add(() => {
+                console.log(`Camera Position: ${camera.position.toString()}`);
+                console.log(`Camera Target: ${camera.target.toString()}`);
+                console.log(`Camera Alpha (horizontal angle): ${(camera.alpha * 180 / Math.PI).toFixed(2)}°`);
+                console.log(`Camera Beta (vertical angle): ${(camera.beta * 180 / Math.PI).toFixed(2)}°`);
+                
+                // Sync GUI camera with main camera
+                guiCamera.position = camera.position.clone();
+                guiCamera.target = camera.target.clone();
+                guiCamera.alpha = camera.alpha;
+                guiCamera.beta = camera.beta;
+            });
+
+            // Limit the camera beta angle to not go below 30 degrees relative to the ground
+            //camera.lowerBetaLimit = Math.PI / 6; // 30 degrees in radians
+            camera.upperBetaLimit = Math.PI / 2.5; // 30 degrees in radians
+
+            // Add rendering pipeline without depth of field
+            const pipeline = new BABYLON.DefaultRenderingPipeline("pipeline", true, scene, [camera]);
+            
+            scene.clearColor = new BABYLON.Color4(1, 1, 1, 1); // Set clear color to pure white
+            scene.autoClear = true; // Ensure scene clears properly
+            
+            // Light
+            const light = new BABYLON.DirectionalLight("light", new BABYLON.Vector3(-1, -1, -1), scene);
+            light.intensity = 5; // Reduced from 10 to 5 (50% decrease)
+            light.position = new BABYLON.Vector3(1, 0.5, 1);
+            
+            // Environment lighting
+            const hemiLight = new BABYLON.HemisphericLight("hemiLight", new BABYLON.Vector3(0, 1, 0), scene);
+            hemiLight.intensity = 0.6;
+            
+            // Preload Gaus.glb
+            let gausModel;
+            const gausResult = await BABYLON.SceneLoader.ImportMeshAsync("", "./", "Gaus.glb", scene);
+            gausModel = gausResult.meshes[0];
+            gausModel.setEnabled(false); // Initially hidden
+            
+            // Light toggle control
+            const lightToggleBtn = document.getElementById("lightToggle");
+            let gaussianSplatMesh;
+            lightToggleBtn.addEventListener("click", function() {
+                light.intensity = light.intensity > 0 ? 0 : 7.5; // Reduced from 15 to 7.5 (50% decrease)
+                hemiLight.intensity = light.intensity > 0 ? 0.7 : 0.05;
+                // Toggle background color between light gray and almost black
+                scene.clearColor = light.intensity > 0 ? 
+                    new BABYLON.Color4(0.99, 0.99, 0.99, 1) : 
+                    new BABYLON.Color4(0.00, 0.00, 0.00, 1);
+                this.textContent = light.intensity > 0 ? "Toggle Light" : "Light Off";
+                
+                // Toggle GuassianSplatting mesh visibility
+                if (gaussianSplatMesh) {
+                    gaussianSplatMesh.visibility = light.intensity > 0 ? 0 : 1;
+                }
+                
+                // Toggle Gaus model visibility
+                if (gausModel) {
+                    gausModel.setEnabled(light.intensity === 0);
+                }
+
+                // Adjust bloom settings based on light state
+                pipeline.bloomWeight = light.intensity > 0 ? 0.2 : 1;  // 2x increase when light is off
+                pipeline.bloomKernel = light.intensity > 0 ? 50 : 75;    // 1.5x increase when light is off
+            });
+            
+            // Light rotation control
+            const lightRotationSlider = document.getElementById("lightRotation");
+            const angleDisplay = document.getElementById("angleDisplay");
+            const animateToggleBtn = document.getElementById("animateToggle");
+            let animationInterval;
+            let isAnimating = false;
+
+            animateToggleBtn.addEventListener("click", function() {
+                if (!isAnimating) {
+                    // Start animation
+                    isAnimating = true;
+                    this.textContent = "Stop Animation";
+                    let value = parseInt(lightRotationSlider.value);
+                    
+                    animationInterval = setInterval(() => {
+                        value = (value + 1) % 451;
+                        if (value < 270) value = 270;
+                        lightRotationSlider.value = value;
+                        
+                        // Trigger the input event to update light
+                        const event = new Event('input');
+                        lightRotationSlider.dispatchEvent(event);
+                        
+                        if (value >= 450) {
+                            value = 270;
+                        }
+                    }, 50); // Adjust speed by changing interval time
+                } else {
+                    // Stop animation
+                    isAnimating = false;
+                    this.textContent = "Animate Light";
+                    clearInterval(animationInterval);
+                }
+            });
+
+            lightRotationSlider.addEventListener("input", function() {
+                const horizontalAngle = (this.value * Math.PI) / 180;
+                angleDisplay.textContent = `${this.value}°`;
+                
+                // Calculate vertical angle with faster exponential curve (between 3 and 27 degrees)
+                const progress = (this.value - 270) / (450 - 270); // 0 to 1
+                
+                // Increase hemispheric light intensity by 2x when the light rotation is between 270 and 450 degrees
+                hemiLight.intensity = this.value >= 270 && this.value <= 450 ? 1 : 0.3; // 2x increase within the specified range
+                
+                // Calculate vertical angle that increases up to 360 degrees then decreases back to 3
+                let verticalAngle;
+                if (this.value <= 360) {
+                    const upProgress = (this.value - 270) / (360 - 270);
+                    verticalAngle = (3 + 64 * Math.pow(upProgress, 0.5)) * (Math.PI / 180);
+                } else {
+                    const downProgress = (450 - this.value) / (450 - 360);
+                    verticalAngle = (3 + 64 * Math.pow(downProgress, 0.5)) * (Math.PI / 180);
+                }
+                
+                // Update light direction
+                light.direction = new BABYLON.Vector3(
+                    Math.sin(horizontalAngle) * Math.cos(verticalAngle),
+                    -Math.sin(verticalAngle),
+                    Math.cos(horizontalAngle) * Math.cos(verticalAngle)
+                ).normalize();
+
+                // Log the angles
+                console.log(`Horizontal Angle: ${(horizontalAngle * 180 / Math.PI).toFixed(2)}°`);
+                console.log(`Vertical Angle: ${(verticalAngle * 180 / Math.PI).toFixed(2)}°`);
+
+                // Define warm and cool colors with 40% more saturation
+                const warmColor = new BABYLON.Color3(0.95, 0.82, 0.73); // More saturated orange
+                const coolColor = new BABYLON.Color3(0.82, 0.85, 0.95); // More saturated cool blue
+
+                // Calculate color blend based on angle position
+                // Convert progress to a value that peaks at 0.5 (middle of slider)
+                const colorProgress = 1 - Math.abs(progress - 0.5) * 2; // Will be 1 at middle, 0 at ends
+                
+                // Interpolate between warm and cool colors
+                light.diffuse = BABYLON.Color3.Lerp(warmColor, coolColor, colorProgress);
+
+                // Adjust hemispheric light color based on slider position
+                const hemiColor = BABYLON.Color3.Lerp(warmColor, coolColor, colorProgress);
+                hemiLight.diffuse = hemiColor;
+                hemiLight.specular = hemiColor;
+                hemiLight.ground = hemiColor;
+            });
+
+            // Shadow generator
+            var shadowGenerator = new BABYLON.CascadedShadowGenerator(4096, light);
+            shadowGenerator.lambda = 1;
+            shadowGenerator.bias = 0;
+            shadowGenerator.stabilizeCascades = true;
+            shadowGenerator.shadowMaxZ = 1600;
+            shadowGenerator.usePercentageCloserFiltering = true;
+
+            // SSAO
+            const ssao = new BABYLON.SSAO2RenderingPipeline("ssao", scene, {
+                ssaoRatio: 1, // Ratio of the SSAO post-process, typically between 0.25 and 1
+                blurRatio: 1 // Ratio of the blur post-process
+            });
+            ssao.radius = 3; // The radius around the analyzed pixel used to find occluders
+            ssao.totalStrength = 1; // The strength of the SSAO effect
+            ssao.expensiveBlur = true; // Apply a better quality blur
+            ssao.samples = 32; // Number of samples used for the SSAO calculations
+            scene.postProcessRenderPipelineManager.attachCamerasToRenderPipeline("ssao", camera);
+            console.log("SSAO pipeline initialized");
+
+            // SSAO Toggle Button
+            const ssaoToggleBtn = document.getElementById("ssaoToggle");
+            let ssaoEnabled = true;
+            ssaoToggleBtn.addEventListener("click", function() {
+                if (ssaoEnabled) {
+                    scene.postProcessRenderPipelineManager.detachCamerasFromRenderPipeline("ssao", camera);
+                    this.textContent = "Enable SSAO";
+                } else {
+                    scene.postProcessRenderPipelineManager.attachCamerasToRenderPipeline("ssao", camera);
+                    this.textContent = "Disable SSAO";
+                }
+                ssaoEnabled = !ssaoEnabled;
+            });
+            
+            // Add bloom effects
+            pipeline.bloomEnabled = false;
+            pipeline.bloomThreshold = 0.02;
+            pipeline.bloomWeight = 0.2;
+            pipeline.bloomKernel = 40;
+            pipeline.bloomScale = 0.3;
+            console.log("Bloom effects pipeline initialized");
+            
+            // Add grain effect
+            const grain = new BABYLON.GrainPostProcess("grain", 1.0, camera);
+            grain.intensity = 7;
+            grain.animated = true;
+            console.log("Grain post-process initialized");
+
+            // Load the GLB model
+            console.log("Starting to load GLB model...");
+            const result = await BABYLON.SceneLoader.ImportMeshAsync("", "./", "M1.glb", scene);
+            console.log("GLB model loaded successfully");
+
+            // Array of marker names
+            const markerNames = [
+                "Marker_Bedroom1",
+                "Marker_Bedroom2",
+                "Marker_Kitchen",
+                "Marker_Entrance",
+                "Marker_Stairway",
+                "Marker_Bathroom"
+            ];
+
+            let markers = [];
+            let currentlyEnlarged = null;
+
+            markerNames.forEach(markerName => {
+                const markerNode = scene.getTransformNodeByName(markerName);
+                console.log(`Checking for marker node: ${markerName}`, markerNode);
+                
+                if (markerNode) {
+                    const image = new BABYLON.GUI.Image(markerName + "_image", `./${markerName}.png`);
+                    console.log(`Created image control for ${markerName}:`, image);
+ 
+                    // Set initial properties
+                    const normalWidth = "94px";
+                    const normalHeight = "101px";
+                    const enlargedWidth = "470px";  // 5x normal width
+                    const enlargedHeight = "505px"; // 5x normal height
+
+                    image.width = normalWidth;
+                    image.height = normalHeight;
+                    image.transformCenterY = 1;
+                    image.transformCenterX = 0.5;
+                    image.scaleX = 1.0;
+                    image.scaleY = 1.0;
+                    image.isPointerBlocker = true;
+
+                    // Add pointer events logging
+                    image.onPointerDownObservable.add(() => {
+                        console.log(`Pointer DOWN on ${markerName}`);
+                    });
+
+                    image.onPointerUpObservable.add(() => {
+                        console.log(`Pointer UP on ${markerName}`);
+                    });
+
+                    image.onPointerClickObservable.add(() => {
+                        console.log(`Pointer CLICK on ${markerName}`);
+                    });
+
+                    image.onPointerEnterObservable.add(() => {
+                        console.log(`Pointer ENTER on ${markerName}`);
+                    });
+
+                    image.onPointerOutObservable.add(() => {
+                        console.log(`Pointer OUT on ${markerName}`);
+                    });
+
+                    // Click handler for enlarging markers
+                    image.onPointerUpObservable.add(() => {
+                        console.log("Pointer up detected");
+                        console.log("Current size:", image.width, image.height);
+                        console.log("Marker clicked:", markerName);
+                        console.log("Currently enlarged marker:", currentlyEnlarged ? currentlyEnlarged.name : "none");
+                        
+                        if (currentlyEnlarged === image) {
+                            console.log("Attempting to reset size to normal");
+                            image.width = normalWidth;
+                            image.height = normalHeight;
+                            console.log("New size after reset:", image.width, image.height);
+                            currentlyEnlarged = null;
+                        } else {
+                            console.log("Attempting to enlarge");
+                            // Reset any previously enlarged marker
+                            if (currentlyEnlarged) {
+                                console.log("Resetting previously enlarged marker");
+                                currentlyEnlarged.width = normalWidth;
+                                currentlyEnlarged.height = normalHeight;
+                            }
+                            // Enlarge this marker
+                            image.width = enlargedWidth;
+                            image.height = enlargedHeight;
+                            console.log("New size after enlarging:", image.width, image.height);
+                            currentlyEnlarged = image;
+                        }
+                        // Add this right after setting the new size
+                        guiTexture.markAsDirty();
+                    });
+
+                    // Hover effect
+                    image.onPointerEnterObservable.add(() => {
+                        if (currentlyEnlarged !== image) {
+                            image.scaleX = 1.1;
+                            image.scaleY = 1.1;
+                        }
+                    });
+                    
+                    image.onPointerOutObservable.add(() => {
+                        if (currentlyEnlarged !== image) {
+                            image.scaleX = 1.0;
+                            image.scaleY = 1.0;
+                        }
+                    });
+                    
+                    // Add to GUI
+                    guiTexture.addControl(image);
+                    console.log(`Added ${markerName} to GUI texture`);
+                    
+                    markers.push({ 
+                        node: markerNode, 
+                        image: image
+                    });
+                }
+            });
+
+            scene.registerBeforeRender(() => {
+                // Sort markers by distance to camera (furthest first)
+                markers.sort((a, b) => {
+                    const distA = BABYLON.Vector3.Distance(camera.position, a.node.getAbsolutePosition());
+                    const distB = BABYLON.Vector3.Distance(camera.position, b.node.getAbsolutePosition());
+                    return distB - distA;
+                });
+                
+                // Remove and re-add markers in the new order
+                markers.forEach(marker => {
+                    guiTexture.removeControl(marker.image);
+                    guiTexture.addControl(marker.image);
+                    
+                    // Update position
+                    const markerPosition = BABYLON.Vector3.Project(
+                        marker.node.getAbsolutePosition(),
+                        BABYLON.Matrix.Identity(),
+                        scene.getTransformMatrix(),
+                        camera.viewport.toGlobal(engine.getRenderWidth(), engine.getRenderHeight())
+                    );
+                    marker.image.left = markerPosition.x - engine.getRenderWidth() / 2;
+                    marker.image.top = markerPosition.y - engine.getRenderHeight() / 2;
+                });
+            });
+
+            // Update existing texture on Inside material based on light rotation
+            try {
+                const insideMaterial = scene.getMaterialByName("Inside");
+                if (insideMaterial && insideMaterial.albedoTexture) {
+                    // Get the light rotation slider value (270-450) and map it to texture frames (24-1)
+                    const lightRotationSlider = document.getElementById("lightRotation");
+                    
+                    // Create a new texture to preload
+                    let nextTexture = null;
+                    let texturesEnabled = true;
+
+                    // Texture Toggle Button
+                    const textureToggleBtn = document.getElementById("textureToggle");
+                    textureToggleBtn.addEventListener("click", function() {
+                        texturesEnabled = !texturesEnabled;
+                        if (!texturesEnabled) {
+                            if (insideMaterial.albedoTexture) {
+                                insideMaterial.albedoTexture.dispose();
+                                insideMaterial.albedoTexture = null;
+                            }
+                            this.textContent = "Enable Textures";
+                        } else {
+                            // Trigger texture update based on current rotation
+                            const event = new Event('input');
+                            lightRotationSlider.dispatchEvent(event);
+                            this.textContent = "Disable Textures";
+                        }
+                    });
+                    
+                    lightRotationSlider.addEventListener("input", function() {
+                        if (!texturesEnabled) return;
+
+                        const rotation = parseFloat(this.value);
+                        // Map 270-450 degrees to frames 24-1 (slider at 270 = frame 24, slider at 450 = frame 1)
+                        const frameNumber = Math.min(24, Math.max(1, 24 - (Math.round(((rotation - 270) / 180) * 23))));
+                        // Pad frame number with leading zeros
+                        const paddedFrame = String(frameNumber).padStart(4, '0');
+                        const texturePath = `./bake_frame_${paddedFrame}.png`;
+                        
+                        // Create and load the next texture before updating
+                        nextTexture = new BABYLON.Texture(texturePath, scene, true, false, BABYLON.Texture.BILINEAR_SAMPLINGMODE);
+                        nextTexture.onLoadObservable.addOnce(() => {
+                            if (insideMaterial.albedoTexture) {
+                                insideMaterial.albedoTexture.dispose();
+                            }
+                            insideMaterial.albedoTexture = nextTexture;
+                            console.log(`Updated texture to frame ${frameNumber} at rotation ${rotation}°`);
+                        });
+                    });
+                    console.log("Successfully set up texture rotation mapping");
+                } else {
+                    console.log("Failed to find Inside material or its albedo texture");
+                }
+            } catch (error) {
+                console.log("Error setting up texture rotation:", error);
+            }
+            // Calculate center of all meshes
+            let minX = Number.POSITIVE_INFINITY;
+            let maxX = Number.NEGATIVE_INFINITY;
+            let minY = Number.POSITIVE_INFINITY;
+            let maxY = Number.NEGATIVE_INFINITY;
+            let minZ = Number.POSITIVE_INFINITY;
+            let maxZ = Number.NEGATIVE_INFINITY;
+
+            let ceilingMesh;
+            result.meshes.forEach(mesh => {
+                const boundingBox = mesh.getBoundingInfo().boundingBox;
+                minX = Math.min(minX, boundingBox.minimumWorld.x);
+                maxX = Math.max(maxX, boundingBox.maximumWorld.x);
+                minY = Math.min(minY, boundingBox.minimumWorld.y);
+                maxY = Math.max(maxY, boundingBox.maximumWorld.y);
+                minZ = Math.min(minZ, boundingBox.minimumWorld.z);
+                maxZ = Math.max(maxZ, boundingBox.maximumWorld.z);
+                
+                // Add all meshes to shadow generator
+                shadowGenerator.addShadowCaster(mesh);
+                mesh.receiveShadows = true;
+                if (mesh.name === "ceiling") {
+                    mesh.visibility = 0;
+                    shadowGenerator.addShadowCaster(mesh);
+                    shadowGenerator.setTransparencyShadow(true);
+                    ceilingMesh = mesh;
+                }
+                if (mesh.name === "Mesh") {
+                    mesh.visibility = 0;
+                    gaussianSplatMesh = mesh;
+                }
+            });
+
+            console.log("GUI texture created:", guiTexture);
+            console.log("GUI texture properties:", {
+                isEnabled: guiTexture.isEnabled,
+                isForeground: guiTexture.isForeground,
+                isPointerBlocker: guiTexture.isPointerBlocker
+            });
+
+            return {mainScene: scene, guiScene: guiScene};
+        }
+
+        createScene().then(scenes => {
+            console.log("Scene creation completed");
+            engine.runRenderLoop(() => {
+                scenes.mainScene.render(); // Render main scene first
+                scenes.guiScene.render(); // Render GUI scene on top without clearing
+            });
+        });
+
+        window.addEventListener("resize", () => {
+            engine.resize();
+        });
+    </script>
+</body>
+</html>
